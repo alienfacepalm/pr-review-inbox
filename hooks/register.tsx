@@ -9,7 +9,6 @@ import {
   diffInbox,
   explainGhFailure,
   formatAge,
-  mockPullRequests,
   openArgv,
   parsePullRequests,
   reviewArgv,
@@ -39,7 +38,6 @@ const isBusy = atom({ plugin: 'pr-review-inbox', key: 'isBusy' } as const, false
 // Module variables restart on a hot reload, which only costs one repeated toast.
 let isPolling = false
 let lastErrorText = ''
-let isMockMode = false
 
 function firstLine(text: string): string {
   return text.trim().split(/\r?\n/)[0] ?? ''
@@ -60,8 +58,6 @@ function say($: TEngine, text: string) {
 }
 
 async function fetchPullRequests($: TEngine): Promise<IPullRequest[]> {
-  if (isMockMode) return mockPullRequests(await $.clock.now())
-
   const run = await $.process.run(searchArgv(), { timeoutMs: 30_000 })
   if (run.exitCode !== 0) {
     throw new Error(firstLine(run.stderr) || `gh exited with code ${run.exitCode}`)
@@ -147,12 +143,6 @@ async function requestAction($: TEngine, action: TReviewAction): Promise<void> {
 
 function submitReview($: TEngine, request: IPendingAction): Promise<void> {
   return withBusy($, async () => {
-    if (isMockMode) {
-      await update($, pending, () => null)
-      await say($, 'Mock data: nothing was sent to GitHub.')
-      return
-    }
-
     const body = (await read($, draftComment)).trim()
     const run = await $.process.run(reviewArgv(request.action, request.url, body.length > 0), {
       stdin: body,
@@ -175,11 +165,6 @@ function openInBrowser($: TEngine): Promise<void> {
   return withBusy($, async () => {
     const selected = await findSelected($)
     if (selected === undefined) return
-
-    if (isMockMode) {
-      await say($, 'Mock data: nothing was opened.')
-      return
-    }
 
     const run = await $.process.run(openArgv(selected.url), { timeoutMs: 15_000 })
     await say($, run.exitCode === 0 ? `Opened ${shortRef(selected)}` : firstLine(run.stderr))
@@ -210,7 +195,6 @@ export const register: Register = (on, options) => {
     typeof options.pollMinutes === 'number' && options.pollMinutes >= 1
       ? options.pollMinutes
       : DEFAULT_POLL_MINUTES
-  isMockMode = options.shouldUseMockData === true
 
   on('session.start', async ($, e, next) => {
     await $.command.register({

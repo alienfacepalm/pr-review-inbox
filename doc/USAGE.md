@@ -39,12 +39,6 @@ requested again notifies again.
 
 State kept across sessions: `seenUrls` in the plugin's `$.store`.
 
-## Mock data
-
-Turn on `shouldUseMockData` (in `/config`, then `/reload-plugins`) to fill the pane with three sample PRs
-without `gh` or a network. `Open` and the review buttons then report `Mock data: nothing was ...` and
-do nothing. Turn it off to go back to your real requests.
-
 ## Troubleshooting
 
 - `⇄ PRs: gh error` badge: click it; the pane shows what is wrong and how to fix it:

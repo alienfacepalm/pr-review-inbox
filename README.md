@@ -25,8 +25,7 @@ Nothing else to install: the plugin has no npm packages and no build step. The `
 comes from the host. Git is needed only to install from a GitHub marketplace.
 
 If a dependency is missing the mod says so instead of failing silently: the footer shows `⇄ PRs: gh error` and
-the pane and toast give the fix (install `gh`, run `gh auth login`, or upgrade `gh`). `shouldUseMockData`
-works without `gh`, which is a quick way to confirm the plugin itself installed.
+the pane and toast give the fix (install `gh`, run `gh auth login`, or upgrade `gh`).
 
 ## Install
 
@@ -49,15 +48,11 @@ Restart Claude Code or run `/reload-plugins`, then run `/prs`. Pick up later ver
 
 For development: `claude --plugin-dir <path-to-this-folder>`.
 
-`dev-fake-gh/gh.exe` is a Windows-only demo binary built from `gh.cs`; it is not committed. Build it with
-`csc` to run `dev-fake-gh/run-demo.ps1`.
-
 ## Options
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `pollMinutes` | `5` | How often to ask GitHub (1 to 60 minutes) |
-| `shouldUseMockData` | `false` | List three sample PRs instead of calling `gh`. Open and review actions send nothing to GitHub. |
 
 Set them in `/config` under the plugin's rows.
 

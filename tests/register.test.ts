@@ -210,31 +210,3 @@ test('a failing gh shows an error badge instead of a status line', async ($, on)
   expect((await pane.find({ text: 'gh auth login' }))?.text).toContain('gh: gh is not signed in')
   await pane.unmount()
 })
-
-test('mock mode lists sample PRs and never runs gh', { options: { shouldUseMockData: true } }, async ($, on) => {
-  const clock = mock.clock(on, { now: Date.parse('2026-10-06T00:00:00Z') })
-  mock.store(on, { seenUrls: [] })
-
-  const calls: (readonly string[])[] = []
-  on('process.run', (_$, e) => {
-    calls.push(e.argv)
-    return { value: ok('') }
-  })
-  on('session.start', (_$, e) => ({ cwd: e.cwd }))
-  on('command.register', (_$, e) => ({ value: { command: e.name } }))
-  on('ui.status', () => ({ value: undefined }))
-  on('ui.toast', () => ({ value: undefined }))
-
-  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
-  await clock.settle()
-
-  const ui = await $.ui.mount(PANE)
-  expect(await ui.find({ key: 'pr:https://github.com/acme/web-app/pull/128' })).toBeDefined()
-  expect(await ui.find({ key: 'pr:https://github.com/acme/billing/pull/9' })).toBeDefined()
-
-  await ui.press({ key: 'open' })
-  await ui.press({ key: 'approve' })
-  await ui.press({ key: 'confirm' })
-  expect(calls).toEqual([])
-  await ui.unmount()
-})
