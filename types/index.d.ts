@@ -12,6 +12,8 @@ export interface IPullRequest {
 
 export type TReviewAction = 'approve' | 'request-changes' | 'comment'
 
+export type TSortMode = 'newest' | 'oldest' | 'repo'
+
 export interface IPendingAction {
   readonly action: TReviewAction
   readonly url: string
@@ -29,6 +31,10 @@ declare module 'claude-code' {
       pollError: string | null
       lastPolledAt: number | null
       isBusy: boolean
+      filterText: string
+      sortMode: TSortMode
+      isHidingDrafts: boolean
+      listOffset: number
     }
   }
 }

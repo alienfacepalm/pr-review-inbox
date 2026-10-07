@@ -11,10 +11,22 @@
 
 ## The pane
 
-The top line has the count, when it last updated, and `Refresh` (hotkey `f`).
-Below it is the list of requests (up to 8 rows, scrolling with the selection). Press a row to select it.
+The pane asks for a tall, wide body and fits itself to whatever it gets, so it works with dozens of requests.
 
-For the selected PR the pane shows title, repository, author, age, comment count, draft flag, labels and URL, then:
+- **Header**: the count (`N`, or `shown of total` while a filter or `Hide drafts` is on), when it last updated, and
+  `Refresh` (hotkey `f`).
+- **Filter**: type in the `Filter` field to narrow the list as you type. Every word must match the repo, number,
+  title, author or a label (case-insensitive). `Clear filter` (hotkey `x`) appears while a filter is set.
+- **Controls**: `Sort: newest|oldest|repo` (hotkey `s`, cycles), `Hide drafts` / `Show drafts` (hotkey `d`),
+  `↑ k` and `↓ j` to move the selection.
+- **List**: one aligned line per request: `>` marks the selection and `●` a request you have not looked at, then
+  `repo#N`, the title (`[draft]` for drafts), `@author` and the age. The author column drops out on a narrow pane.
+  Only the rows that fit are drawn; the line under the list shows `first–last of total`. Scroll with the mouse wheel
+  or the page keys, or step with `j` / `k`. Pressing a row, or moving the focus ring (Tab, arrows) onto it, selects it.
+  On a very short terminal the pane body itself scrolls instead of the list.
+- **Detail**: below the list, always in view: title, repository, author, age, comment count, draft flag and labels.
+
+For the selected PR:
 
 - `Open` (hotkey `o`): `gh pr view <url> --web`.
 - `Review with Claude` (hotkey `v`): fills the prompt with a review request for that PR. It does not send it:
@@ -28,7 +40,8 @@ After a review is posted the pane refreshes. GitHub drops you from the requested
 
 ## What counts as a request
 
-`gh search prs --review-requested=@me --state=open`: open PRs where you are asked directly.
+`gh search prs --review-requested=@me --state=open --limit 100`: open PRs where you are asked directly (the 100 most
+recent; the pane says so when the result is that long).
 Requests made only to a team you belong to are not included.
 
 ## First run
