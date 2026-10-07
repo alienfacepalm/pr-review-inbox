@@ -1,4 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
+
+type TTestEngine = Parameters<TestBody>[0]
+type TTestOn = Parameters<TestBody>[1]
+type TMountedPane = Awaited<ReturnType<TTestEngine['ui']['mount']>>
 
 const PLUGIN = 'pr-review-inbox'
 const PR_URL = 'https://github.com/acme/app/pull/7'
@@ -231,12 +236,12 @@ const searchResultOf = (count: number): string =>
 
 const TALL_PANE = { ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows: 30 } } } as const
 
-const rowKeysOf = async (ui: { findAll: (query: { type: 'Button' }) => Promise<readonly { key?: string }[]> }) =>
+const rowKeysOf = async (ui: Pick<TMountedPane, 'findAll'>) =>
   (await ui.findAll({ type: 'Button' }))
     .map(button => button.key ?? '')
     .filter(key => key.startsWith('pr:'))
 
-const startWith = async ($: any, on: any, count: number) => {
+const startWith = async ($: TTestEngine, on: TTestOn, count: number) => {
   const clock = mock.clock(on, { now: Date.parse('2026-10-06T00:00:00Z') })
   mock.store(on, { seenUrls: [] })
 

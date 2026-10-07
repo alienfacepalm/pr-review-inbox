@@ -207,7 +207,7 @@ async function stepSelection($: TEngine, delta: number): Promise<void> {
 }
 
 // A new filter, sort or drafts setting starts the list from the top.
-async function changeView($: TEngine, change: () => Promise<void>): Promise<void> {
+async function changeView($: TEngine, change: () => Promise<unknown>): Promise<void> {
   await change()
   await update($, listOffset, () => 0)
   await syncSelection($, true)
