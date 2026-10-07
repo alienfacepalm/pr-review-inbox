@@ -1,15 +1,27 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import {
+  SEARCH_LIMIT,
   badgeLabel,
+  clampOffset,
   describeFresh,
   diffInbox,
   explainGhFailure,
+  filterPullRequests,
   formatAge,
+  formatRow,
+  listRowBudget,
+  nextSortMode,
+  organizePullRequests,
   parsePullRequests,
+  refColumnWidth,
   reviewArgv,
+  revealOffset,
   searchArgv,
+  sortPullRequests,
+  spaceAfterIcon,
 } from '../hooks/github'
+import type { IPullRequest } from '../types'
 
 const SAMPLE = JSON.stringify([
   {
@@ -127,5 +139,109 @@ describe('github helpers', () => {
     expect(formatAge('2026-10-05T18:00:00Z', now)).toBe('6h')
     expect(formatAge('2026-10-01T00:00:00Z', now)).toBe('5d')
     expect(formatAge('nope', now)).toBe('unknown age')
+  })
+})
+
+const NOW = Date.parse('2026-10-06T00:00:00Z')
+
+const makePullRequest = (number: number, overrides: Partial<IPullRequest> = {}): IPullRequest => ({
+  url: `https://github.com/acme/app/pull/${number}`,
+  number,
+  title: `Task ${number}`,
+  repository: 'acme/app',
+  author: 'sam',
+  isDraft: false,
+  createdAt: new Date(NOW - number * 3_600_000).toISOString(),
+  commentsCount: 0,
+  labels: [],
+  ...overrides,
+})
+
+describe('list helpers', () => {
+  const list = [
+    makePullRequest(1, { title: 'Fix login', labels: ['bug'] }),
+    makePullRequest(2, { title: 'Add dark mode', author: 'jchen', isDraft: true }),
+    makePullRequest(3, { title: 'Migrate billing', repository: 'acme/billing' }),
+  ]
+
+  test('asks gh for as many requests as the pane can window', () => {
+    expect(searchArgv()).toContain(String(SEARCH_LIMIT))
+  })
+
+  test('filters on every word across ref, title, author and labels', () => {
+    expect(filterPullRequests(list, '', false)).toHaveLength(3)
+    expect(filterPullRequests(list, 'LOGIN', false).map(row => row.number)).toEqual([1])
+    expect(filterPullRequests(list, 'bug acme/app', false).map(row => row.number)).toEqual([1])
+    expect(filterPullRequests(list, '@jchen', false)).toHaveLength(0)
+    expect(filterPullRequests(list, 'jchen', false).map(row => row.number)).toEqual([2])
+    expect(filterPullRequests(list, 'billing', false).map(row => row.number)).toEqual([3])
+    expect(filterPullRequests(list, 'nothing like this', false)).toHaveLength(0)
+  })
+
+  test('hides drafts on request', () => {
+    expect(filterPullRequests(list, '', true).map(row => row.number)).toEqual([1, 3])
+  })
+
+  test('sorts newest first, oldest first, or by repo', () => {
+    expect(sortPullRequests(list, 'newest').map(row => row.number)).toEqual([1, 2, 3])
+    expect(sortPullRequests(list, 'oldest').map(row => row.number)).toEqual([3, 2, 1])
+    expect(sortPullRequests(list, 'repo').map(row => row.number)).toEqual([2, 1, 3])
+    expect(list.map(row => row.number)).toEqual([1, 2, 3])
+  })
+
+  test('cycles the sort mode and filters before it sorts', () => {
+    expect(nextSortMode('newest')).toBe('oldest')
+    expect(nextSortMode('oldest')).toBe('repo')
+    expect(nextSortMode('repo')).toBe('newest')
+    expect(organizePullRequests(list, 'acme', 'oldest', true).map(row => row.number)).toEqual([3, 1])
+  })
+
+  test('sizes the list from the body, within a floor and a ceiling', () => {
+    expect(listRowBudget(30)).toBe(17)
+    expect(listRowBudget(4)).toBe(5)
+    expect(listRowBudget(500)).toBe(40)
+  })
+
+  test('clamps the window and reveals a row by the smallest move', () => {
+    expect(clampOffset(-3, 60, 17)).toBe(0)
+    expect(clampOffset(99, 60, 17)).toBe(43)
+    expect(clampOffset(5, 10, 17)).toBe(0)
+    expect(revealOffset(10, 12, 17)).toBe(10)
+    expect(revealOffset(10, 4, 17)).toBe(4)
+    expect(revealOffset(10, 40, 17)).toBe(24)
+  })
+
+  test('formats rows to one aligned width and drops the author when narrow', () => {
+    const rows = [
+      makePullRequest(1),
+      makePullRequest(22, { title: 'A very long title '.repeat(10), isDraft: true }),
+    ]
+    const refWidth = refColumnWidth(rows)
+    const draw = (width: number, index: number) =>
+      formatRow(rows[index] as IPullRequest, {
+        width,
+        nowMs: NOW,
+        refWidth,
+        isSelected: index === 0,
+        isUnseen: index === 1,
+      })
+
+    expect(draw(80, 0)).toHaveLength(78)
+    expect(draw(80, 1)).toHaveLength(78)
+    expect(draw(80, 0)).toMatch(/^> acme\/app#1 /)
+    expect(draw(80, 1)).toMatch(/^● acme\/app#22 {2}\[draft\] /)
+    expect(draw(80, 0)).toContain('@sam')
+    expect(draw(40, 0)).not.toContain('@sam')
+    expect(draw(40, 0)).toContain('1h')
+  })
+})
+
+describe('footer labels', () => {
+  test('puts two spaces after a leading icon, and leaves plain labels alone', () => {
+    expect(spaceAfterIcon('⏸ plan mode on')).toBe('⏸  plan mode on')
+    expect(spaceAfterIcon('⏸plan mode on')).toBe('⏸  plan mode on')
+    expect(spaceAfterIcon('⏸  plan mode on')).toBe('⏸  plan mode on')
+    expect(spaceAfterIcon('focus')).toBe('focus')
+    expect(spaceAfterIcon('')).toBe('')
   })
 })

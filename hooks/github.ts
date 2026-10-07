@@ -1,8 +1,9 @@
-import type { IPullRequest, TReviewAction } from '../types'
+import type { IPullRequest, TReviewAction, TSortMode } from '../types'
 
 const SEARCH_FIELDS =
   'number,title,url,repository,author,isDraft,createdAt,commentsCount,labels'
-const SEARCH_LIMIT = '50'
+// How many requests one poll asks `gh` for; a result this long may have been cut off.
+export const SEARCH_LIMIT = 100
 
 const REVIEW_FLAGS: Readonly<Record<TReviewAction, string>> = {
   approve: '--approve',
@@ -25,7 +26,7 @@ export const searchArgv = (): string[] => [
   '--json',
   SEARCH_FIELDS,
   '--limit',
-  SEARCH_LIMIT,
+  String(SEARCH_LIMIT),
 ]
 
 // Turns the three ways the GitHub CLI dependency typically fails into a message that says what to do;
@@ -156,3 +157,119 @@ export const describeFresh =(fresh: readonly IPullRequest[]): string[] => {
       `Review requested: ${shortRef(pullRequest)} "${truncate(pullRequest.title, 60)}" by @${pullRequest.author}`,
   )
 }
+
+export const SORT_MODES: readonly TSortMode[] = ['newest', 'oldest', 'repo']
+
+export const nextSortMode = (mode: TSortMode): TSortMode =>
+  SORT_MODES[(SORT_MODES.indexOf(mode) + 1) % SORT_MODES.length] ?? 'newest'
+
+const createdMs = (pullRequest: IPullRequest): number => {
+  const ms = Date.parse(pullRequest.createdAt)
+  return Number.isNaN(ms) ? 0 : ms
+}
+
+// Every word of `query` must appear in the ref, title, author or a label (case-insensitive).
+export const filterPullRequests = (
+  list: readonly IPullRequest[],
+  query: string,
+  isHidingDrafts: boolean,
+): IPullRequest[] => {
+  const words = query.toLowerCase().split(/\s+/).filter(word => word !== '')
+
+  return list.filter(pullRequest => {
+    if (isHidingDrafts && pullRequest.isDraft) return false
+    if (words.length === 0) return true
+
+    const haystack = [
+      shortRef(pullRequest),
+      pullRequest.title,
+      pullRequest.author,
+      ...pullRequest.labels,
+    ]
+      .join(' ')
+      .toLowerCase()
+    return words.every(word => haystack.includes(word))
+  })
+}
+
+export const sortPullRequests = (
+  list: readonly IPullRequest[],
+  mode: TSortMode,
+): IPullRequest[] => {
+  const sorted = [...list]
+  if (mode === 'newest') return sorted.sort((a, b) => createdMs(b) - createdMs(a))
+  if (mode === 'oldest') return sorted.sort((a, b) => createdMs(a) - createdMs(b))
+  return sorted.sort(
+    (a, b) => a.repository.localeCompare(b.repository) || b.number - a.number,
+  )
+}
+
+// The rows of the list the pane draws and the keyboard steps through.
+export const organizePullRequests = (
+  list: readonly IPullRequest[],
+  query: string,
+  mode: TSortMode,
+  isHidingDrafts: boolean,
+): IPullRequest[] => sortPullRequests(filterPullRequests(list, query, isHidingDrafts), mode)
+
+// Rows the pane draws besides the list: header, filter, controls, window line, detail, actions, notes.
+export const CHROME_ROWS = 13
+export const MIN_LIST_ROWS = 5
+export const MAX_LIST_ROWS = 40
+
+// How many list rows fit in a body of `bodyRows`.
+export const listRowBudget = (bodyRows: number): number =>
+  Math.min(MAX_LIST_ROWS, Math.max(MIN_LIST_ROWS, Math.floor(bodyRows) - CHROME_ROWS))
+
+export const clampOffset = (offset: number, total: number, rows: number): number =>
+  Math.max(0, Math.min(Math.floor(offset), Math.max(0, total - rows)))
+
+// The smallest move that brings row `index` into the window of `rows` starting at `offset`.
+export const revealOffset = (offset: number, index: number, rows: number): number => {
+  if (index < offset) return index
+  if (index >= offset + rows) return index - rows + 1
+  return offset
+}
+
+const MAX_REF_WIDTH = 30
+
+// The width of the ref column: the longest ref among the drawn rows, capped.
+export const refColumnWidth = (rows: readonly IPullRequest[]): number =>
+  Math.min(MAX_REF_WIDTH, rows.reduce((longest, row) => Math.max(longest, shortRef(row).length), 0))
+
+const AUTHOR_WIDTH = 14
+const AGE_WIDTH = 5
+const MIN_TITLE_WIDTH = 20
+
+export interface IRowOptions {
+  readonly width: number
+  readonly nowMs: number
+  readonly refWidth: number
+  readonly isSelected: boolean
+  readonly isUnseen: boolean
+}
+
+// One aligned line: marker, ref, title (takes the slack), author, age. The author column is
+// dropped when the body is too narrow to leave the title room.
+export const formatRow = (pullRequest: IPullRequest, options: IRowOptions): string => {
+  const marker = options.isSelected ? '>' : options.isUnseen ? '●' : ' '
+  const ref = truncate(shortRef(pullRequest), options.refWidth).padEnd(options.refWidth)
+  const age = formatAge(pullRequest.createdAt, options.nowMs).padStart(AGE_WIDTH)
+  const title = pullRequest.isDraft ? `[draft] ${pullRequest.title}` : pullRequest.title
+
+  const lead = 2 + options.refWidth + 2
+  const available = options.width - 2 // the button's own padding
+  const withAuthor = available - lead - (2 + AUTHOR_WIDTH + 1 + AGE_WIDTH)
+  if (withAuthor >= MIN_TITLE_WIDTH) {
+    const author = truncate(`@${pullRequest.author}`, AUTHOR_WIDTH).padEnd(AUTHOR_WIDTH)
+    return `${marker} ${ref}  ${truncate(title, withAuthor).padEnd(withAuthor)}  ${author} ${age}`
+  }
+
+  const titleWidth = Math.max(8, available - lead - (1 + AGE_WIDTH))
+  return `${marker} ${ref}  ${truncate(title, titleWidth).padEnd(titleWidth)} ${age}`
+}
+
+// Footer mode labels start with an icon (`⏸ plan mode on`). Many terminals draw that icon two cells
+// wide over the one-cell gap, which glues it to the text, so the gap is made two spaces wide.
+export const spaceAfterIcon = (mode: string): string =>
+  mode.replace(/^(\p{Extended_Pictographic}\uFE0F?) */u, '$1  ')
