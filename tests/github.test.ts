@@ -4,6 +4,7 @@ import {
   badgeLabel,
   describeFresh,
   diffInbox,
+  explainGhFailure,
   formatAge,
   parsePullRequests,
   reviewArgv,
@@ -24,6 +25,29 @@ const SAMPLE = JSON.stringify([
   },
   { not: 'a pull request' },
 ])
+
+describe('explainGhFailure', () => {
+  test('says how to install gh when it is missing', () => {
+    expect(explainGhFailure('spawn gh ENOENT')).toContain('https://cli.github.com')
+    expect(explainGhFailure("'gh' is not recognized as an internal or external command")).toContain(
+      'not found',
+    )
+  })
+
+  test('says how to sign in when gh has no credentials', () => {
+    expect(
+      explainGhFailure('To get started with GitHub CLI, please run:  gh auth login'),
+    ).toContain('gh auth login')
+  })
+
+  test('says to upgrade when gh predates `gh search`', () => {
+    expect(explainGhFailure('unknown command "search" for "gh"')).toContain('2.21')
+  })
+
+  test('leaves other errors untouched', () => {
+    expect(explainGhFailure('HTTP 502: bad gateway')).toBe('HTTP 502: bad gateway')
+  })
+})
 
 describe('github helpers', () => {
   test('parses gh search output and skips rows without a url', () => {

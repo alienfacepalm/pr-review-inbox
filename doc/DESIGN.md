@@ -13,7 +13,7 @@ Notes
 
 - Pane state lives in `$.state` so a hot reload keeps it; the dedupe list lives in `$.store` so it survives sessions.
 - The PR count is a pressable footer badge rather than `$.ui.status`, which pins a separate notice line under the
-  prompt. A gh failure shows as an error badge; the pane holds the error text.
+  prompt. A gh failure shows as an error badge; the pane holds the error text, run through `explainGhFailure` so a missing, signed-out or too-old `gh` (the plugin's only external dependency) says how to fix it.
 - Posting actions are two-step on purpose (select action, then `Confirm`).
 - Review bodies go through `--body-file -` on stdin to avoid quoting and length problems on Windows.
 - Account choice is left to `gh`. Supporting several accounts would mean handling tokens, which this mod avoids.

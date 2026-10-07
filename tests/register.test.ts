@@ -207,7 +207,7 @@ test('a failing gh shows an error badge instead of a status line', async ($, on)
   await footer.unmount()
 
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ text: 'gh auth login' }))?.text).toContain('gh: To get started')
+  expect((await pane.find({ text: 'gh auth login' }))?.text).toContain('gh: gh is not signed in')
   await pane.unmount()
 })
 

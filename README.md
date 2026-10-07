@@ -15,8 +15,18 @@ It runs `gh` on your machine, so it uses whichever GitHub account `gh` has activ
 
 ## Requirements
 
-- Claude Code terminal session (the mod uses `$.process.run`, which is CLI only)
-- [GitHub CLI](https://cli.github.com) signed in: `gh auth login`
+| Dependency | Needed for | Check |
+| --- | --- | --- |
+| Claude Code, terminal CLI | the mod runtime (`$.process.run` is CLI only; not drawn on desktop or mobile). Developed on 2.1.293; the minimum is untested. | `claude --version` |
+| [GitHub CLI](https://cli.github.com) 2.21 or later | listing (`gh search prs`), open, and review actions. Developed on 2.93.0. | `gh --version` |
+| `gh` signed in to the account that gets review requests | every call; the mod has no token handling | `gh auth status`, fix with `gh auth login` |
+
+Nothing else to install: the plugin has no npm packages and no build step. The `claude-code` module it imports
+comes from the host. Git is needed only to install from a GitHub marketplace.
+
+If a dependency is missing the mod says so instead of failing silently: the footer shows `⇄ PRs: gh error` and
+the pane and toast give the fix (install `gh`, run `gh auth login`, or upgrade `gh`). `shouldUseMockData`
+works without `gh`, which is a quick way to confirm the plugin itself installed.
 
 ## Install
 

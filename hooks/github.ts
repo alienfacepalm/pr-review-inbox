@@ -28,6 +28,23 @@ export const searchArgv = (): string[] => [
   SEARCH_LIMIT,
 ]
 
+// Turns the three ways the GitHub CLI dependency typically fails into a message that says what to do;
+// anything else passes through unchanged.
+export const MIN_GH_VERSION = '2.21'
+
+export const explainGhFailure = (message: string): string => {
+  if (/\bENOENT\b|is not recognized|command not found|no such file or directory/i.test(message)) {
+    return 'GitHub CLI (gh) not found. Install it from https://cli.github.com, then restart Claude Code.'
+  }
+  if (/unknown command/i.test(message)) {
+    return `gh is too old for "gh search". Upgrade to ${MIN_GH_VERSION} or later (gh --version).`
+  }
+  if (/gh auth login|not logged in|bad credentials|http 401/i.test(message)) {
+    return 'gh is not signed in. Run `gh auth login`, then reopen /prs.'
+  }
+  return message
+}
+
 export const openArgv = (url: string): string[] => ['gh', 'pr', 'view', url, '--web']
 
 // The body goes in on stdin (`--body-file -`) so quoting and length never matter.

@@ -47,6 +47,10 @@ do nothing. Turn it off to go back to your real requests.
 
 ## Troubleshooting
 
-- `⇄ PRs: gh error` badge: click it; the pane shows the first line of `gh`'s error. Run `gh auth status`.
+- `⇄ PRs: gh error` badge: click it; the pane shows what is wrong and how to fix it:
+  - `GitHub CLI (gh) not found`: install it from https://cli.github.com, then restart Claude Code.
+  - `gh is not signed in`: run `gh auth login` (check with `gh auth status`).
+  - `gh is too old for "gh search"`: upgrade `gh` to 2.21 or later (`gh --version`).
+  - Any other text is `gh`'s own first error line.
 - Wrong account: `gh auth switch`, then `/prs`.
 - Nothing appears on desktop or mobile: the mod needs the terminal CLI (`$.process.run`); the pane is not drawn on mobile.

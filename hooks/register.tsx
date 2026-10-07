@@ -7,6 +7,7 @@ import {
   badgeLabel,
   describeFresh,
   diffInbox,
+  explainGhFailure,
   formatAge,
   mockPullRequests,
   openArgv,
@@ -51,7 +52,7 @@ function asStringList(value: unknown): string[] | undefined {
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return explainGhFailure(error instanceof Error ? error.message : String(error))
 }
 
 function say($: TEngine, text: string) {
@@ -160,7 +161,7 @@ function submitReview($: TEngine, request: IPendingAction): Promise<void> {
     await update($, pending, () => null)
 
     if (run.exitCode !== 0) {
-      await say($, firstLine(run.stderr) || `gh exited with code ${run.exitCode}`)
+      await say($, explainGhFailure(firstLine(run.stderr) || `gh exited with code ${run.exitCode}`))
       return
     }
 
