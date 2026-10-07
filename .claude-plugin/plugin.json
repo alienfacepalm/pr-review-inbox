@@ -1,6 +1,6 @@
 {
   "name": "pr-review-inbox",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "description": "Pops up in Claude Code when someone requests your review on a GitHub PR, with a list to pick from and review actions.",
   "author": { "name": "Brandon Pliska * AlienFacepalm" },
   "types": "./types/index.d.ts",

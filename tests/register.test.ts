@@ -421,3 +421,162 @@ test('a PR you are assigned to shows up beside the review requests', async ($, o
   expect(await ui.find({ text: /review requested \+ assigned|assigned/ })).toBeDefined()
   await ui.unmount()
 })
+
+const STATUS_TEXT = [
+  '  ✓ Logged in to github.com account alienfacepalm (keyring)',
+  '  ✓ Logged in to github.com account bpliska-gp (keyring)',
+].join('\n')
+
+const GOVPILOT_URL = 'https://github.com/govpilot/app/pull/3'
+const GOVPILOT_RESULT = JSON.stringify([
+  { ...JSON.parse(SEARCH_RESULT)[0], number: 3, title: 'Permit fix', url: GOVPILOT_URL },
+])
+
+interface ICall {
+  readonly argv: readonly string[]
+  readonly env: Record<string, string> | undefined
+  readonly stdin: string | undefined
+}
+
+// Two signed-in accounts: only bpliska-gp is assigned a PR, and each has its own token.
+const startWithTwoAccounts = async (
+  $: TTestEngine,
+  on: TTestOn,
+  failing: readonly string[] = [],
+) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-06T00:00:00Z') })
+  mock.store(on, { seenUrls: [] })
+
+  const calls: ICall[] = []
+  on('process.run', (_$, e) => {
+    calls.push({ argv: e.argv, env: e.init?.env, stdin: e.init?.stdin })
+    const [, area, verb] = e.argv
+    if (area === 'auth' && verb === 'status') return { value: ok(STATUS_TEXT) }
+    if (area === 'auth' && verb === 'token') {
+      const user = e.argv[e.argv.indexOf('--user') + 1] ?? ''
+      return failing.includes(user)
+        ? { value: { ...ok(''), exitCode: 1, stderr: 'no such login\n' } }
+        : { value: ok(`token-of-${user}\n`) }
+    }
+    if (area === 'search') {
+      const isGovpilot = e.init?.env?.GH_TOKEN === 'token-of-bpliska-gp'
+      const isAssigned = e.argv.includes('--assignee=@me')
+      return { value: ok(isGovpilot && isAssigned ? GOVPILOT_RESULT : '[]') }
+    }
+    return { value: ok('') }
+  })
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('prompt.fill', (_$, e) => {
+    filled.push(e.text)
+    return { isFilled: true }
+  })
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  return calls
+}
+
+const filled: string[] = []
+
+test('every signed-in account is searched with its own token, and the list merges them', async ($, on) => {
+  const calls = await startWithTwoAccounts($, on)
+
+  const searches = calls.filter(call => call.argv[2] === 'prs')
+  expect(searches).toHaveLength(4)
+  expect(new Set(searches.map(call => call.env?.GH_TOKEN))).toEqual(
+    new Set(['token-of-alienfacepalm', 'token-of-bpliska-gp']),
+  )
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: `pr:${GOVPILOT_URL}` })).toBeDefined()
+  expect(await ui.find({ text: /account bpliska-gp/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('the account button narrows the list to one account and back', async ($, on) => {
+  await startWithTwoAccounts($, on)
+
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ key: 'account' }))?.text).toContain('Account: all')
+
+  await ui.press({ key: 'account' })
+  expect((await ui.find({ key: 'account' }))?.text).toContain('Account: alienfacepalm')
+  expect(await ui.find({ key: `pr:${GOVPILOT_URL}` })).toBeUndefined()
+
+  await ui.press({ key: 'account' })
+  expect((await ui.find({ key: 'account' }))?.text).toContain('Account: bpliska-gp')
+  expect(await ui.find({ key: `pr:${GOVPILOT_URL}` })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a review posts as the account that owns the PR', async ($, on) => {
+  const calls = await startWithTwoAccounts($, on)
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'approve' })
+  await ui.press({ key: 'confirm' })
+
+  const review = calls.find(call => call.argv.includes('review'))
+  expect(review?.argv).toEqual(['gh', 'pr', 'review', GOVPILOT_URL, '--approve'])
+  expect(review?.env).toEqual({ GH_TOKEN: 'token-of-bpliska-gp' })
+  await ui.unmount()
+})
+
+test('the drafted Claude prompt names the account and how to get its token', async ($, on) => {
+  filled.length = 0
+  await startWithTwoAccounts($, on)
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'claude' })
+
+  expect(filled[0]).toContain('"bpliska-gp"')
+  expect(filled[0]).toContain('gh auth token --hostname github.com --user bpliska-gp')
+  expect(filled[0]).toContain('$env:GH_TOKEN = (gh auth token --hostname github.com --user bpliska-gp)')
+  expect(filled[0]).toContain('GH_TOKEN=$(gh auth token --hostname github.com --user bpliska-gp) gh pr diff')
+  expect(filled[0]).not.toContain('token-of-')
+  await ui.unmount()
+})
+
+test('a background review spawns a subagent with the same account hint and posts nothing', async ($, on) => {
+  const spawned: { prompt: string; description?: string }[] = []
+  on('agent.spawn', (_$, e) => {
+    spawned.push({ prompt: e.prompt, description: e.description })
+    return { model: 'sonnet', agentId: 'agent-1' }
+  })
+  const calls = await startWithTwoAccounts($, on)
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'background' })
+
+  expect(spawned).toHaveLength(1)
+  expect(spawned[0]?.description).toBe('Review acme/app#3')
+  expect(spawned[0]?.prompt).toContain(GOVPILOT_URL)
+  expect(spawned[0]?.prompt).toContain('gh auth token --hostname github.com --user bpliska-gp')
+  expect(spawned[0]?.prompt).toContain('summary under 300 words')
+  expect(spawned[0]?.prompt).toContain('Do not post anything to GitHub')
+  expect(calls.some(call => call.argv.includes('review'))).toBe(false)
+  expect(await ui.find({ text: /in the background/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a refused background review says why', async ($, on) => {
+  on('agent.spawn', () => ({ deny: 'subagents are off' }))
+  await startWithTwoAccounts($, on)
+
+  const ui = await $.ui.mount(PANE)
+  await ui.press({ key: 'background' })
+  expect((await ui.find({ text: /Could not start/ }))?.text).toContain('subagents are off')
+  await ui.unmount()
+})
+
+test('one account failing keeps the other account\'s PRs and says what was not read', async ($, on) => {
+  await startWithTwoAccounts($, on, ['alienfacepalm'])
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: `pr:${GOVPILOT_URL}` })).toBeDefined()
+  expect((await ui.find({ text: /Not read/ }))?.text).toContain('alienfacepalm: no such login')
+  await ui.unmount()
+})

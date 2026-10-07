@@ -37,9 +37,46 @@ export const searchArgv = (reason: TRequestReason = 'review'): string[] => [
   String(SEARCH_LIMIT),
 ]
 
-// Turns the three ways the GitHub CLI dependency typically fails into a message that says what to do;
+const GH_HOST = 'github.com'
+
+export const accountsArgv = (): string[] => ['gh', 'auth', 'status', '--hostname', GH_HOST]
+
+export const tokenArgv = (account: string): string[] => [
+  'gh',
+  'auth',
+  'token',
+  '--hostname',
+  GH_HOST,
+  '--user',
+  account,
+]
+
+// The signed-in accounts, in the order `gh auth status` lists them. Older gh prints the report on
+// stderr and exits 1 when any account is broken, so the caller hands in both streams.
+export const parseAccounts = (text: string): string[] => [
+  ...new Set([...text.matchAll(/Logged in to \S+ account (\S+)/g)].map(match => match[1] ?? '')),
+]
+
+// Per-call credentials: `gh` reads GH_TOKEN ahead of its stored login, so no account is ever switched.
+export const tokenEnv = (token: string): Record<string, string> => ({ GH_TOKEN: token })
+
+// The account to act as for `pullRequest`: the one the pane is narrowed to if it sees the PR,
+// otherwise the first account that found it. Undefined means `gh`'s own active account.
+export const actingAccount = (
+  pullRequest: IPullRequest,
+  accountFilter: string,
+): string | undefined =>
+  pullRequest.accounts.includes(accountFilter) ? accountFilter : pullRequest.accounts[0]
+
+// '' (every account), then each account in turn, then back to ''.
+export const nextAccountFilter = (current: string, accounts: readonly string[]): string => {
+  const index = accounts.indexOf(current)
+  return accounts[index + 1] ?? (current === '' && accounts[0] !== undefined ? accounts[0] : '')
+}
+
+// Turns the ways the GitHub CLI dependency typically fails into a message that says what to do;
 // anything else passes through unchanged.
-export const MIN_GH_VERSION = '2.21'
+export const MIN_GH_VERSION = '2.46'
 
 export const explainGhFailure = (message: string): string => {
   if (/\bENOENT\b|is not recognized|command not found|no such file or directory/i.test(message)) {
@@ -48,10 +85,39 @@ export const explainGhFailure = (message: string): string => {
   if (/unknown command/i.test(message)) {
     return `gh is too old for "gh search". Upgrade to ${MIN_GH_VERSION} or later (gh --version).`
   }
+  if (/unknown flag/i.test(message)) {
+    return `gh is too old for several accounts. Upgrade to ${MIN_GH_VERSION} or later (gh --version).`
+  }
   if (/gh auth login|not logged in|bad credentials|http 401/i.test(message)) {
     return 'gh is not signed in. Run `gh auth login`, then reopen /prs.'
   }
   return message
+}
+
+// What Claude is asked when a PR is picked up. gh acts as its active account unless told otherwise, and
+// that account may not see this repo, so a PR from another account says how to get that account's token.
+export const reviewPrompt = (
+  pullRequest: IPullRequest,
+  account: string | undefined,
+  isBackground = false,
+): string => {
+  const asAccount =
+    account === undefined
+      ? ''
+      : ` This PR belongs to the gh account "${account}", which may not be gh's active one: run every gh command ` +
+        `with GH_TOKEN set to the output of \`gh auth token --hostname github.com --user ${account}\`. ` +
+        `PowerShell: \`$env:GH_TOKEN = (gh auth token --hostname github.com --user ${account})\` once, then run gh. ` +
+        `bash: \`GH_TOKEN=$(gh auth token --hostname github.com --user ${account}) gh pr diff <url>\`. ` +
+        'Never print the token.'
+  const report = isBackground
+    ? ' Finish with a summary under 300 words: what it changes, the risks, and the review comments you would leave.'
+    : ''
+
+  return (
+    `Review ${pullRequest.url} (${shortRef(pullRequest)}). Use \`gh pr view\` and \`gh pr diff\` to read it, ` +
+    'then summarize what it changes, flag risks, and suggest review comments. ' +
+    `Do not post anything to GitHub.${report}${asAccount}`
+  )
 }
 
 export const openArgv = (url: string): string[] => ['gh', 'pr', 'view', url, '--web']
@@ -78,6 +144,7 @@ const asText = (value: unknown): string => (typeof value === 'string' ? value : 
 export const parsePullRequests = (
   stdout: string,
   reason: TRequestReason = 'review',
+  account = '',
 ): IPullRequest[] => {
   const parsed: unknown = JSON.parse(stdout)
   if (!Array.isArray(parsed)) {
@@ -107,13 +174,14 @@ export const parsePullRequests = (
       commentsCount: typeof raw.commentsCount === 'number' ? raw.commentsCount : 0,
       labels,
       reasons: [reason],
+      accounts: account === '' ? [] : [account],
     })
   }
 
   return pullRequests
 }
 
-// One entry per URL, in first-seen order, with the reasons of every search that found it.
+// One entry per URL, in first-seen order, with the reasons and accounts of every search that found it.
 export const mergePullRequests = (
   lists: readonly (readonly IPullRequest[])[],
 ): IPullRequest[] => {
@@ -124,7 +192,11 @@ export const mergePullRequests = (
       pullRequest.url,
       known === undefined
         ? pullRequest
-        : { ...known, reasons: [...new Set([...known.reasons, ...pullRequest.reasons])] },
+        : {
+            ...known,
+            reasons: [...new Set([...known.reasons, ...pullRequest.reasons])],
+            accounts: [...new Set([...known.accounts, ...pullRequest.accounts])],
+          },
     )
   }
   return [...byUrl.values()]
@@ -204,21 +276,24 @@ const createdMs = (pullRequest: IPullRequest): number => {
   return Number.isNaN(ms) ? 0 : ms
 }
 
-// Every word of `query` must appear in the ref, title, author or a label (case-insensitive).
+// Every word of `query` must appear in the ref, account, title, author or a label (case-insensitive).
 export const filterPullRequests = (
   list: readonly IPullRequest[],
   query: string,
   isHidingDrafts: boolean,
+  accountFilter = '',
 ): IPullRequest[] => {
   const words = query.toLowerCase().split(/\s+/).filter(word => word !== '')
 
   return list.filter(pullRequest => {
     if (isHidingDrafts && pullRequest.isDraft) return false
+    if (accountFilter !== '' && !pullRequest.accounts.includes(accountFilter)) return false
     if (words.length === 0) return true
 
     const haystack = [
       shortRef(pullRequest),
       reasonLabel(pullRequest),
+      ...pullRequest.accounts,
       pullRequest.title,
       pullRequest.author,
       ...pullRequest.labels,
@@ -247,7 +322,9 @@ export const organizePullRequests = (
   query: string,
   mode: TSortMode,
   isHidingDrafts: boolean,
-): IPullRequest[] => sortPullRequests(filterPullRequests(list, query, isHidingDrafts), mode)
+  accountFilter = '',
+): IPullRequest[] =>
+  sortPullRequests(filterPullRequests(list, query, isHidingDrafts, accountFilter), mode)
 
 // Rows the pane draws besides the list: header, filter, controls, window line, detail, actions, notes.
 export const CHROME_ROWS = 13
