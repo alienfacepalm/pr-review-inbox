@@ -1,0 +1,23 @@
+{
+  "name": "pr-review-inbox",
+  "version": "0.2.0",
+  "description": "Pops up in Claude Code when someone requests your review on a GitHub PR, with a list to pick from and review actions.",
+  "author": { "name": "Brandon Pliska * AlienFacepalm" },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "pollMinutes": {
+      "type": "number",
+      "title": "Poll interval (minutes)",
+      "description": "How often to ask GitHub for PRs awaiting your review.",
+      "default": 5,
+      "min": 1,
+      "max": 60
+    },
+    "shouldUseMockData": {
+      "type": "boolean",
+      "title": "Use mock data",
+      "description": "List sample PRs instead of calling gh. Review actions send nothing to GitHub.",
+      "default": false
+    }
+  }
+}

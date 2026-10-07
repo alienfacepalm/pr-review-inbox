@@ -1,0 +1,6 @@
+{
+  "name": "alienfacepalm",
+  "description": "Claude Code plugins by Brandon Pliska * AlienFacepalm.",
+  "owner": { "name": "Brandon Pliska * AlienFacepalm" },
+  "plugins": [{ "name": "pr-review-inbox", "source": "./" }]
+}

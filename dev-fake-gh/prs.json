@@ -1,0 +1,35 @@
+[
+  {
+    "number": 128,
+    "title": "Fix token refresh race on login",
+    "url": "https://github.com/acme/web-app/pull/128",
+    "repository": { "nameWithOwner": "acme/web-app" },
+    "author": { "login": "samrivera" },
+    "isDraft": false,
+    "createdAt": "2026-10-06T14:20:00Z",
+    "commentsCount": 4,
+    "labels": [{ "name": "bug" }, { "name": "auth" }]
+  },
+  {
+    "number": 42,
+    "title": "Add dark mode toggle to settings",
+    "url": "https://github.com/acme/mobile/pull/42",
+    "repository": { "nameWithOwner": "acme/mobile" },
+    "author": { "login": "jchen" },
+    "isDraft": false,
+    "createdAt": "2026-10-07T09:05:00Z",
+    "commentsCount": 0,
+    "labels": [{ "name": "feature" }]
+  },
+  {
+    "number": 9,
+    "title": "WIP: migrate billing service to the new queue",
+    "url": "https://github.com/acme/billing/pull/9",
+    "repository": { "nameWithOwner": "acme/billing" },
+    "author": { "login": "priya-k" },
+    "isDraft": true,
+    "createdAt": "2026-10-03T18:40:00Z",
+    "commentsCount": 11,
+    "labels": [{ "name": "infra" }]
+  }
+]
