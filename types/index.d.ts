@@ -12,6 +12,8 @@ export interface IPullRequest {
   readonly labels: readonly string[]
   // Why it is in the inbox: your review was requested, you are an assignee, or both.
   readonly reasons: readonly TRequestReason[]
+  // The signed-in gh accounts that see it. Empty when gh listed none and its active account was used.
+  readonly accounts: readonly string[]
 }
 
 export type TReviewAction = 'approve' | 'request-changes' | 'comment'
@@ -40,6 +42,10 @@ declare module 'claude-code' {
       sortMode: TSortMode
       isHidingDrafts: boolean
       listOffset: number
+      // Every signed-in gh account, '' for "all" in accountFilter, and what the last poll could not read.
+      accounts: string[]
+      accountFilter: string
+      accountNotice: string
     }
   }
 }

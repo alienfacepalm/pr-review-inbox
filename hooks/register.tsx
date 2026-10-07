@@ -6,6 +6,8 @@ import {
   ACTION_VERBS,
   SEARCH_LIMIT,
   SEARCH_REASONS,
+  accountsArgv,
+  actingAccount,
   badgeLabel,
   clampOffset,
   describeFresh,
@@ -16,17 +18,22 @@ import {
   formatRow,
   listRowBudget,
   mergePullRequests,
+  nextAccountFilter,
   nextSortMode,
   openArgv,
   organizePullRequests,
+  parseAccounts,
   parsePullRequests,
   refColumnWidth,
   reasonLabel,
   reviewArgv,
+  reviewPrompt,
   revealOffset,
   searchArgv,
   shortRef,
   spaceAfterIcon,
+  tokenArgv,
+  tokenEnv,
   truncate,
 } from './github'
 
@@ -54,6 +61,9 @@ const filterText = atom({ plugin: 'pr-review-inbox', key: 'filterText' } as cons
 const sortMode = atom({ plugin: 'pr-review-inbox', key: 'sortMode' } as const, 'newest')
 const isHidingDrafts = atom({ plugin: 'pr-review-inbox', key: 'isHidingDrafts' } as const, false)
 const listOffset = atom({ plugin: 'pr-review-inbox', key: 'listOffset' } as const, 0)
+const accounts = atom({ plugin: 'pr-review-inbox', key: 'accounts' } as const, [])
+const accountFilter = atom({ plugin: 'pr-review-inbox', key: 'accountFilter' } as const, '')
+const accountNotice = atom({ plugin: 'pr-review-inbox', key: 'accountNotice' } as const, '')
 
 // Module variables restart on a hot reload, which only costs one repeated toast.
 let isPolling = false
@@ -83,24 +93,85 @@ interface IFetched {
   readonly pullRequests: IPullRequest[]
   // A search came back full, so there may be more than it returned.
   readonly isTruncated: boolean
+  readonly accounts: string[]
+  // One "account: reason" per account that could not be read; the others still count.
+  readonly failures: string[]
 }
 
-// One `gh search` per reason (review requested, assigned), merged by URL.
-async function fetchPullRequests($: TEngine): Promise<IFetched> {
-  const found = await Promise.all(
+// The signed-in accounts. A failed or unreadable listing is not an error: the search then runs as
+// gh's active account, which also covers a single login.
+async function listAccounts($: TEngine): Promise<string[]> {
+  try {
+    const run = await $.process.run(accountsArgv(), { timeoutMs: 15_000 })
+    return parseAccounts(`${run.stdout}\n${run.stderr}`)
+  } catch {
+    return []
+  }
+}
+
+// `GH_TOKEN` for one account, read fresh each time and never kept. No account means gh's own.
+async function accountEnv(
+  $: TEngine,
+  account: string | undefined,
+): Promise<Record<string, string> | undefined> {
+  if (account === undefined || account === '') return undefined
+
+  const run = await $.process.run(tokenArgv(account), { timeoutMs: 15_000 })
+  const token = run.stdout.trim()
+  if (run.exitCode !== 0 || token === '') {
+    throw new Error(firstLine(run.stderr) || `no token for ${account}`)
+  }
+
+  return tokenEnv(token)
+}
+
+async function envFor($: TEngine, pullRequest: IPullRequest) {
+  return accountEnv($, actingAccount(pullRequest, await read($, accountFilter)))
+}
+
+// One `gh search` per reason (review requested, assigned) as one account.
+async function searchAs($: TEngine, account: string): Promise<IPullRequest[][]> {
+  const env = await accountEnv($, account)
+  return Promise.all(
     SEARCH_REASONS.map(async reason => {
-      const run = await $.process.run(searchArgv(reason), { timeoutMs: 30_000 })
+      const run = await $.process.run(searchArgv(reason), {
+        ...(env === undefined ? {} : { env }),
+        timeoutMs: 30_000,
+      })
       if (run.exitCode !== 0) {
         throw new Error(firstLine(run.stderr) || `gh exited with code ${run.exitCode}`)
       }
 
-      return parsePullRequests(run.stdout, reason)
+      return parsePullRequests(run.stdout, reason, account)
     }),
   )
+}
+
+// Every account's searches, merged by URL. One account failing does not hide the others;
+// only every account failing fails the poll.
+async function fetchPullRequests($: TEngine): Promise<IFetched> {
+  const known = await listAccounts($)
+  const targets = known.length > 0 ? known : ['']
+  const settled = await Promise.allSettled(targets.map(account => searchAs($, account)))
+
+  const found: IPullRequest[][] = []
+  const failures: string[] = []
+  settled.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      found.push(...result.value)
+    } else {
+      failures.push(`${targets[index]}: ${errorText(result.reason)}`)
+    }
+  })
+
+  const failed = settled.find(result => result.status === 'rejected')
+  if (failed !== undefined && found.length === 0) throw failed.reason
 
   return {
     pullRequests: mergePullRequests(found),
     isTruncated: found.some(list => list.length >= SEARCH_LIMIT),
+    accounts: known,
+    failures,
   }
 }
 
@@ -111,6 +182,7 @@ async function visibleList($: TEngine): Promise<IPullRequest[]> {
     await read($, filterText),
     await read($, sortMode),
     await read($, isHidingDrafts),
+    await read($, accountFilter),
   )
 }
 
@@ -145,14 +217,24 @@ async function refresh($: TEngine): Promise<void> {
   isPolling = true
 
   try {
-    const { pullRequests: current, isTruncated: isCut } = await fetchPullRequests($)
-    const { fresh, seenUrls } = diffInbox(asStringList(await $.store.get(SEEN_KEY)), current)
-    await $.store.set(SEEN_KEY, seenUrls)
+    const { pullRequests: current, isTruncated: isCut, accounts: known, failures } =
+      await fetchPullRequests($)
+    const previousSeen = asStringList(await $.store.get(SEEN_KEY))
+    const { fresh, seenUrls } = diffInbox(previousSeen, current)
+    // An account that failed is missing from `current`; keep its PRs seen so they do not toast again.
+    const keptSeen =
+      failures.length > 0 && previousSeen !== undefined
+        ? [...new Set([...previousSeen, ...seenUrls])]
+        : seenUrls
+    await $.store.set(SEEN_KEY, keptSeen)
 
     const currentUrls = new Set(seenUrls)
     const now = await $.clock.now()
     await update($, pullRequests, () => current)
     await update($, isTruncated, () => isCut)
+    await update($, accounts, () => known)
+    await update($, accountFilter, filter => (known.includes(filter) ? filter : ''))
+    await update($, accountNotice, () => failures.join(' · '))
     await update($, unseenUrls, list => [
       ...list.filter(url => currentUrls.has(url)),
       ...fresh.map(pullRequest => pullRequest.url),
@@ -243,6 +325,13 @@ function cycleSort($: TEngine): Promise<void> {
   return changeView($, () => update($, sortMode, mode => nextSortMode(mode)))
 }
 
+function cycleAccount($: TEngine): Promise<void> {
+  return changeView($, async () => {
+    const known = await read($, accounts)
+    return update($, accountFilter, filter => nextAccountFilter(filter, known))
+  })
+}
+
 function toggleDrafts($: TEngine): Promise<void> {
   return changeView($, () => update($, isHidingDrafts, isHiding => !isHiding))
 }
@@ -264,7 +353,10 @@ async function requestAction($: TEngine, action: TReviewAction): Promise<void> {
 function submitReview($: TEngine, request: IPendingAction): Promise<void> {
   return withBusy($, async () => {
     const body = (await read($, draftComment)).trim()
+    const target = (await read($, pullRequests)).find(pullRequest => pullRequest.url === request.url)
+    const env = target === undefined ? undefined : await envFor($, target)
     const run = await $.process.run(reviewArgv(request.action, request.url, body.length > 0), {
+      ...(env === undefined ? {} : { env }),
       stdin: body,
       timeoutMs: 60_000,
     })
@@ -286,7 +378,11 @@ function openInBrowser($: TEngine): Promise<void> {
     const selected = await findSelected($)
     if (selected === undefined) return
 
-    const run = await $.process.run(openArgv(selected.url), { timeoutMs: 15_000 })
+    const env = await envFor($, selected)
+    const run = await $.process.run(openArgv(selected.url), {
+      ...(env === undefined ? {} : { env }),
+      timeoutMs: 15_000,
+    })
     await say($, run.exitCode === 0 ? `Opened ${shortRef(selected)}` : firstLine(run.stderr))
   })
 }
@@ -296,18 +392,36 @@ async function reviewWithClaude($: TEngine): Promise<void> {
   const selected = await findSelected($)
   if (selected === undefined) return
 
-  const filled = await $.prompt.fill({
-    text:
-      `Review ${selected.url} (${shortRef(selected)}). Use \`gh pr view\` and \`gh pr diff\` to read it, ` +
-      'then summarize what it changes, flag risks, and suggest review comments. ' +
-      'Do not post anything to GitHub.',
-  })
+  const account = actingAccount(selected, await read($, accountFilter))
+  const filled = await $.prompt.fill({ text: reviewPrompt(selected, account) })
   await say(
     $,
     filled.isFilled
       ? 'Prompt drafted: press Esc to return to it, edit, then send.'
       : 'Could not draft the prompt right now.',
   )
+}
+
+// Hands the review to a subagent that starts with an empty context: the diff is read there, and only
+// its summary comes back to this session. Nothing is posted.
+function reviewInBackground($: TEngine): Promise<void> {
+  return withBusy($, async () => {
+    const selected = await findSelected($)
+    if (selected === undefined) return
+
+    const account = actingAccount(selected, await read($, accountFilter))
+    const started = await $.agent.spawn({
+      prompt: reviewPrompt(selected, account, true),
+      description: `Review ${shortRef(selected)}`,
+      subagentType: 'general-purpose',
+    })
+    await say(
+      $,
+      started.deny === undefined
+        ? `Reviewing ${shortRef(selected)} in the background: the summary arrives in this session.`
+        : `Could not start the background review: ${started.deny}`,
+    )
+  })
 }
 
 export const register: Register = (on, options) => {
@@ -410,7 +524,10 @@ export const register: Register = (on, options) => {
     const filter = await read($, filterText)
     const mode = await read($, sortMode)
     const isHiding = await read($, isHidingDrafts)
-    const list = organizePullRequests(all, filter, mode, isHiding)
+    const known = await read($, accounts)
+    const account = await read($, accountFilter)
+    const accountProblem = await read($, accountNotice)
+    const list = organizePullRequests(all, filter, mode, isHiding, account)
     const url = await read($, selectedUrl)
     const request = await read($, pending)
     const error = await read($, pollError)
@@ -430,7 +547,7 @@ export const register: Register = (on, options) => {
     const confirming =
       request !== null ? list.find(pullRequest => pullRequest.url === request.url) : undefined
 
-    const isNarrowed = filter.trim() !== '' || isHiding
+    const isNarrowed = filter.trim() !== '' || isHiding || account !== ''
     const count = isNarrowed ? `${list.length} of ${all.length}` : `${all.length}`
     const isCapped = await read($, isTruncated)
     let windowLine = ''
@@ -457,7 +574,7 @@ export const register: Register = (on, options) => {
         <Input
           key="filter"
           label="Filter"
-          placeholder="repo, title, author or label"
+          placeholder="repo, title, author, label or account"
           value={filter}
           onInput={text => setFilter($, text)}
           onSubmit={text => setFilter($, text)}
@@ -471,6 +588,14 @@ export const register: Register = (on, options) => {
             hotkey="d"
             onPress={() => toggleDrafts($)}
           />
+          {known.length > 1 && (
+            <Button
+              key="account"
+              label={`Account: ${account === '' ? 'all' : account}`}
+              hotkey="a"
+              onPress={() => cycleAccount($)}
+            />
+          )}
           <Button key="prev" label="↑ k" hotkey="k" onPress={() => stepSelection($, -1)} />
           <Button key="next" label="↓ j" hotkey="j" onPress={() => stepSelection($, 1)} />
           {filter !== '' && (
@@ -479,6 +604,9 @@ export const register: Register = (on, options) => {
         </Box>
 
         {error !== null && <Text color="red">{`gh: ${truncate(error, width - 4)}`}</Text>}
+        {accountProblem !== '' && (
+          <Text color="red">{`Not read: ${truncate(accountProblem, width - 12)}`}</Text>
+        )}
 
         {rows.map(pullRequest => (
           <Button
@@ -506,6 +634,7 @@ export const register: Register = (on, options) => {
               {[
                 shortRef(selected),
                 reasonLabel(selected),
+                selected.accounts.length > 0 ? `account ${selected.accounts.join(' + ')}` : '',
                 `@${selected.author}`,
                 `opened ${formatAge(selected.createdAt, now)} ago`,
                 `${selected.commentsCount} comments`,
@@ -523,6 +652,12 @@ export const register: Register = (on, options) => {
                 label="Review with Claude"
                 hotkey="v"
                 onPress={() => reviewWithClaude($)}
+              />
+              <Button
+                key="background"
+                label="Review in background"
+                hotkey="b"
+                onPress={() => reviewInBackground($)}
               />
             </Box>
 

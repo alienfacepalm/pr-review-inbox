@@ -2,6 +2,8 @@ import { describe, expect, test } from 'claude-code/testing'
 
 import {
   SEARCH_LIMIT,
+  accountsArgv,
+  actingAccount,
   badgeLabel,
   clampOffset,
   describeFresh,
@@ -12,8 +14,10 @@ import {
   formatRow,
   listRowBudget,
   mergePullRequests,
+  nextAccountFilter,
   nextSortMode,
   organizePullRequests,
+  parseAccounts,
   parsePullRequests,
   reasonLabel,
   refColumnWidth,
@@ -22,6 +26,8 @@ import {
   searchArgv,
   sortPullRequests,
   spaceAfterIcon,
+  tokenArgv,
+  tokenEnv,
 } from '../hooks/github'
 import type { IPullRequest } from '../types'
 
@@ -55,7 +61,8 @@ describe('explainGhFailure', () => {
   })
 
   test('says to upgrade when gh predates `gh search`', () => {
-    expect(explainGhFailure('unknown command "search" for "gh"')).toContain('2.21')
+    expect(explainGhFailure('unknown command "search" for "gh"')).toContain('2.46')
+    expect(explainGhFailure('unknown flag: --user')).toContain('several accounts')
   })
 
   test('leaves other errors untouched', () => {
@@ -79,6 +86,7 @@ describe('github helpers', () => {
       commentsCount: 2,
       labels: ['bug'],
       reasons: ['review'],
+      accounts: [],
     })
   })
 
@@ -160,6 +168,7 @@ const makePullRequest = (number: number, overrides: Partial<IPullRequest> = {}):
   commentsCount: 0,
   labels: [],
   reasons: ['review'],
+  accounts: [],
   ...overrides,
 })
 
@@ -276,5 +285,73 @@ describe('assigned PRs', () => {
     expect(filterPullRequests([both, mine], 'review', false).map(row => row.number)).toEqual([1])
     expect(describeFresh([mine])[0]).toContain('Assigned to you: acme/app#2')
     expect(describeFresh([both])[0]).toContain('Review requested: acme/app#1')
+  })
+})
+
+const STATUS = `github.com
+  ✓ Logged in to github.com account alienfacepalm (keyring)
+  - Active account: true
+  - Token: gho_************************************
+
+  ✓ Logged in to github.com account bpliska-gp (keyring)
+  - Active account: false
+
+  X Failed to log in to github.com account old-login (keyring)
+`
+
+describe('accounts', () => {
+  test('lists the signed-in accounts and skips a broken login', () => {
+    expect(parseAccounts(STATUS)).toEqual(['alienfacepalm', 'bpliska-gp'])
+    expect(parseAccounts(STATUS + STATUS)).toEqual(['alienfacepalm', 'bpliska-gp'])
+    expect(parseAccounts('You are not logged into any GitHub hosts.')).toEqual([])
+  })
+
+  test('asks gh for one account by name, never by switching', () => {
+    expect(accountsArgv()).toEqual(['gh', 'auth', 'status', '--hostname', 'github.com'])
+    expect(tokenArgv('bpliska-gp')).toEqual([
+      'gh', 'auth', 'token', '--hostname', 'github.com', '--user', 'bpliska-gp',
+    ])
+    expect(tokenEnv('t0k')).toEqual({ GH_TOKEN: 't0k' })
+  })
+
+  test('tags each search with its account and unions the accounts when merging', () => {
+    const [mine] = parsePullRequests(SAMPLE, 'review', 'alienfacepalm')
+    const [work] = parsePullRequests(SAMPLE, 'assigned', 'bpliska-gp')
+    if (mine === undefined || work === undefined) throw new Error('sample did not parse')
+    expect(work.accounts).toEqual(['bpliska-gp'])
+
+    const merged = mergePullRequests([[mine], [work]])
+    expect(merged).toHaveLength(1)
+    expect(merged[0]?.accounts).toEqual(['alienfacepalm', 'bpliska-gp'])
+    expect(merged[0]?.reasons).toEqual(['review', 'assigned'])
+  })
+
+  test('the account filter narrows the list, and a word in the filter box matches the account', () => {
+    const personal = makePullRequest(1, { accounts: ['alienfacepalm'] })
+    const govpilot = makePullRequest(2, { accounts: ['bpliska-gp'] })
+    const list = [personal, govpilot]
+
+    expect(filterPullRequests(list, '', false, 'bpliska-gp').map(row => row.number)).toEqual([2])
+    expect(filterPullRequests(list, '', false, '')).toHaveLength(2)
+    expect(filterPullRequests(list, 'alienfacepalm', false).map(row => row.number)).toEqual([1])
+    expect(organizePullRequests(list, '', 'newest', false, 'alienfacepalm')).toEqual([personal])
+  })
+
+  test('cycles all, then each account, then back to all', () => {
+    const known = ['alienfacepalm', 'bpliska-gp']
+    expect(nextAccountFilter('', known)).toBe('alienfacepalm')
+    expect(nextAccountFilter('alienfacepalm', known)).toBe('bpliska-gp')
+    expect(nextAccountFilter('bpliska-gp', known)).toBe('')
+    expect(nextAccountFilter('', [])).toBe('')
+  })
+
+  test('acts as the filtered account when it sees the PR, otherwise the first that does', () => {
+    const both = makePullRequest(1, { accounts: ['alienfacepalm', 'bpliska-gp'] })
+    const none = makePullRequest(2)
+
+    expect(actingAccount(both, 'bpliska-gp')).toBe('bpliska-gp')
+    expect(actingAccount(both, '')).toBe('alienfacepalm')
+    expect(actingAccount(both, 'someone-else')).toBe('alienfacepalm')
+    expect(actingAccount(none, 'bpliska-gp')).toBeUndefined()
   })
 })
