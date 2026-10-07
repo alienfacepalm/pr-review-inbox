@@ -100,48 +100,6 @@ export const parsePullRequests = (stdout: string): IPullRequest[] => {
   return pullRequests
 }
 
-const HOUR_MS = 3_600_000
-
-// Sample requests for the `shouldUseMockData` option; ages are relative to `nowMs` so they always look recent.
-export const mockPullRequests = (nowMs: number): IPullRequest[] => {
-  const ago = (hours: number): string => new Date(nowMs - hours * HOUR_MS).toISOString()
-  return [
-    {
-      url: 'https://github.com/acme/web-app/pull/128',
-      number: 128,
-      title: 'Fix token refresh race on login',
-      repository: 'acme/web-app',
-      author: 'samrivera',
-      isDraft: false,
-      createdAt: ago(20),
-      commentsCount: 4,
-      labels: ['bug', 'auth'],
-    },
-    {
-      url: 'https://github.com/acme/mobile/pull/42',
-      number: 42,
-      title: 'Add dark mode toggle to settings',
-      repository: 'acme/mobile',
-      author: 'jchen',
-      isDraft: false,
-      createdAt: ago(1),
-      commentsCount: 0,
-      labels: ['feature'],
-    },
-    {
-      url: 'https://github.com/acme/billing/pull/9',
-      number: 9,
-      title: 'WIP: migrate billing service to the new queue',
-      repository: 'acme/billing',
-      author: 'priya-k',
-      isDraft: true,
-      createdAt: ago(96),
-      commentsCount: 11,
-      labels: ['infra'],
-    },
-  ]
-}
-
 export interface IInboxDiff {
   readonly fresh: IPullRequest[]
   readonly seenUrls: string[]

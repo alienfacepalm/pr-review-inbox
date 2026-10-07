@@ -12,12 +12,6 @@
       "default": 5,
       "min": 1,
       "max": 60
-    },
-    "shouldUseMockData": {
-      "type": "boolean",
-      "title": "Use mock data",
-      "description": "List sample PRs instead of calling gh. Review actions send nothing to GitHub.",
-      "default": false
     }
   }
 }
