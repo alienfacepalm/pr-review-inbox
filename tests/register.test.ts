@@ -385,3 +385,39 @@ test('the footer keeps its own labels but widens the gap after an icon', async (
   expect(await ui.find({ text: '⏸  plan mode on' })).toBeDefined()
   await ui.unmount()
 })
+
+test('a PR you are assigned to shows up beside the review requests', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-06T00:00:00Z') })
+  mock.store(on, { seenUrls: [PR_URL] })
+
+  const assignedUrl = 'https://github.com/acme/app/pull/9'
+  const assigned = JSON.stringify([
+    { ...JSON.parse(SEARCH_RESULT)[0], number: 9, title: 'Mine', url: assignedUrl },
+    JSON.parse(SEARCH_RESULT)[0],
+  ])
+  const toasts: string[] = []
+  on('process.run', (_$, e) => ({
+    value: ok(e.argv.includes('--assignee=@me') ? assigned : SEARCH_RESULT),
+  }))
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('command.register', (_$, e) => ({ value: { command: e.name } }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', (_$, e) => {
+    toasts.push(e.text)
+    return { value: undefined }
+  })
+
+  await $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+
+  expect(toasts.join('\n')).toContain('Assigned to you: acme/app#9')
+
+  const ui = await $.ui.mount(PANE)
+  expect(await ui.find({ key: `pr:${PR_URL}` })).toBeDefined()
+  expect(await ui.find({ key: `pr:${assignedUrl}` })).toBeDefined()
+  expect(await ui.find({ text: /PR inbox \(2\)/ })).toBeDefined()
+
+  await ui.input({ key: 'filter', text: 'assigned', kind: 'change' })
+  expect(await ui.find({ text: /review requested \+ assigned|assigned/ })).toBeDefined()
+  await ui.unmount()
+})

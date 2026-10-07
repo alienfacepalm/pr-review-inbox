@@ -5,19 +5,23 @@ import type { IPendingAction, IPullRequest, TReviewAction } from '../types'
 import {
   ACTION_VERBS,
   SEARCH_LIMIT,
+  SEARCH_REASONS,
   badgeLabel,
   clampOffset,
   describeFresh,
+  describeReason,
   diffInbox,
   explainGhFailure,
   formatAge,
   formatRow,
   listRowBudget,
+  mergePullRequests,
   nextSortMode,
   openArgv,
   organizePullRequests,
   parsePullRequests,
   refColumnWidth,
+  reasonLabel,
   reviewArgv,
   revealOffset,
   searchArgv,
@@ -45,6 +49,7 @@ const message = atom({ plugin: 'pr-review-inbox', key: 'message' } as const, '')
 const pollError = atom({ plugin: 'pr-review-inbox', key: 'pollError' } as const, null)
 const lastPolledAt = atom({ plugin: 'pr-review-inbox', key: 'lastPolledAt' } as const, null)
 const isBusy = atom({ plugin: 'pr-review-inbox', key: 'isBusy' } as const, false)
+const isTruncated = atom({ plugin: 'pr-review-inbox', key: 'isTruncated' } as const, false)
 const filterText = atom({ plugin: 'pr-review-inbox', key: 'filterText' } as const, '')
 const sortMode = atom({ plugin: 'pr-review-inbox', key: 'sortMode' } as const, 'newest')
 const isHidingDrafts = atom({ plugin: 'pr-review-inbox', key: 'isHidingDrafts' } as const, false)
@@ -74,13 +79,29 @@ function say($: TEngine, text: string) {
   return update($, message, () => text)
 }
 
-async function fetchPullRequests($: TEngine): Promise<IPullRequest[]> {
-  const run = await $.process.run(searchArgv(), { timeoutMs: 30_000 })
-  if (run.exitCode !== 0) {
-    throw new Error(firstLine(run.stderr) || `gh exited with code ${run.exitCode}`)
-  }
+interface IFetched {
+  readonly pullRequests: IPullRequest[]
+  // A search came back full, so there may be more than it returned.
+  readonly isTruncated: boolean
+}
 
-  return parsePullRequests(run.stdout)
+// One `gh search` per reason (review requested, assigned), merged by URL.
+async function fetchPullRequests($: TEngine): Promise<IFetched> {
+  const found = await Promise.all(
+    SEARCH_REASONS.map(async reason => {
+      const run = await $.process.run(searchArgv(reason), { timeoutMs: 30_000 })
+      if (run.exitCode !== 0) {
+        throw new Error(firstLine(run.stderr) || `gh exited with code ${run.exitCode}`)
+      }
+
+      return parsePullRequests(run.stdout, reason)
+    }),
+  )
+
+  return {
+    pullRequests: mergePullRequests(found),
+    isTruncated: found.some(list => list.length >= SEARCH_LIMIT),
+  }
 }
 
 // The rows the pane draws: the inbox after the filter, the drafts toggle and the sort.
@@ -124,13 +145,14 @@ async function refresh($: TEngine): Promise<void> {
   isPolling = true
 
   try {
-    const current = await fetchPullRequests($)
+    const { pullRequests: current, isTruncated: isCut } = await fetchPullRequests($)
     const { fresh, seenUrls } = diffInbox(asStringList(await $.store.get(SEEN_KEY)), current)
     await $.store.set(SEEN_KEY, seenUrls)
 
     const currentUrls = new Set(seenUrls)
     const now = await $.clock.now()
     await update($, pullRequests, () => current)
+    await update($, isTruncated, () => isCut)
     await update($, unseenUrls, list => [
       ...list.filter(url => currentUrls.has(url)),
       ...fresh.map(pullRequest => pullRequest.url),
@@ -345,8 +367,8 @@ export const register: Register = (on, options) => {
     const first = (await read($, pullRequests)).find(pullRequest => pullRequest.url === unseen[0])
     const label =
       unseen.length === 1 && first !== undefined
-        ? `Review requested: ${shortRef(first)} ${truncate(first.title, 50)}`
-        : `${unseen.length} new PR review requests`
+        ? `${describeReason(first)}: ${shortRef(first)} ${truncate(first.title, 50)}`
+        : `${unseen.length} new PRs in your inbox`
 
     return (
       <Box gap={1}>
@@ -410,7 +432,7 @@ export const register: Register = (on, options) => {
 
     const isNarrowed = filter.trim() !== '' || isHiding
     const count = isNarrowed ? `${list.length} of ${all.length}` : `${all.length}`
-    const isCapped = all.length >= SEARCH_LIMIT
+    const isCapped = await read($, isTruncated)
     let windowLine = ''
     if (list.length > 0) {
       windowLine =
@@ -423,7 +445,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column">
         <Box gap={1}>
-          <Text bold>{`Review requests (${count})`}</Text>
+          <Text bold>{`PR inbox (${count})`}</Text>
           <Text dimColor>
             {polledAt === null
               ? 'loading…'
@@ -483,6 +505,7 @@ export const register: Register = (on, options) => {
             <Text dimColor wrap="truncate">
               {[
                 shortRef(selected),
+                reasonLabel(selected),
                 `@${selected.author}`,
                 `opened ${formatAge(selected.createdAt, now)} ago`,
                 `${selected.commentsCount} comments`,

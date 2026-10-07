@@ -11,9 +11,11 @@ import {
   formatAge,
   formatRow,
   listRowBudget,
+  mergePullRequests,
   nextSortMode,
   organizePullRequests,
   parsePullRequests,
+  reasonLabel,
   refColumnWidth,
   reviewArgv,
   revealOffset,
@@ -76,6 +78,7 @@ describe('github helpers', () => {
       createdAt: '2026-10-05T00:00:00Z',
       commentsCount: 2,
       labels: ['bug'],
+      reasons: ['review'],
     })
   })
 
@@ -85,6 +88,8 @@ describe('github helpers', () => {
 
   test('asks gh for open PRs that request the signed-in user', () => {
     expect(searchArgv()).toContain('--review-requested=@me')
+    expect(searchArgv('assigned')).toContain('--assignee=@me')
+    expect(searchArgv('assigned')).not.toContain('--review-requested=@me')
   })
 
   test('sends review bodies on stdin and never as an argument', () => {
@@ -121,7 +126,7 @@ describe('github helpers', () => {
 
     expect(describeFresh([pullRequest])[0]).toContain('acme/app#7')
     expect(describeFresh([pullRequest, pullRequest, pullRequest, pullRequest])).toEqual([
-      '4 new PR review requests',
+      '4 new PRs in your inbox',
     ])
   })
 
@@ -154,6 +159,7 @@ const makePullRequest = (number: number, overrides: Partial<IPullRequest> = {}):
   createdAt: new Date(NOW - number * 3_600_000).toISOString(),
   commentsCount: 0,
   labels: [],
+  reasons: ['review'],
   ...overrides,
 })
 
@@ -243,5 +249,32 @@ describe('footer labels', () => {
     expect(spaceAfterIcon('⏸  plan mode on')).toBe('⏸  plan mode on')
     expect(spaceAfterIcon('focus')).toBe('focus')
     expect(spaceAfterIcon('')).toBe('')
+  })
+})
+
+describe('assigned PRs', () => {
+  test('tags what each search found, then merges by URL and unions the reasons', () => {
+    const [reviewed] = parsePullRequests(SAMPLE, 'review')
+    const [assigned] = parsePullRequests(SAMPLE, 'assigned')
+    if (reviewed === undefined || assigned === undefined) throw new Error('sample did not parse')
+    expect(assigned.reasons).toEqual(['assigned'])
+
+    const other = makePullRequest(9, { reasons: ['assigned'] })
+    const merged = mergePullRequests([[reviewed], [assigned, other]])
+    expect(merged.map(row => row.number)).toEqual([7, 9])
+    expect(merged[0]?.reasons).toEqual(['review', 'assigned'])
+    expect(merged[1]?.reasons).toEqual(['assigned'])
+  })
+
+  test('says why a PR is there, and lets the filter find it by that', () => {
+    const both = makePullRequest(1, { reasons: ['review', 'assigned'] })
+    const mine = makePullRequest(2, { reasons: ['assigned'] })
+
+    expect(reasonLabel(both)).toBe('review requested + assigned')
+    expect(reasonLabel(mine)).toBe('assigned')
+    expect(filterPullRequests([both, mine], 'assigned', false)).toHaveLength(2)
+    expect(filterPullRequests([both, mine], 'review', false).map(row => row.number)).toEqual([1])
+    expect(describeFresh([mine])[0]).toContain('Assigned to you: acme/app#2')
+    expect(describeFresh([both])[0]).toContain('Review requested: acme/app#1')
   })
 })

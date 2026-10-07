@@ -21,8 +21,10 @@ Notes
   than the body (a short terminal) the hook passes the scroll to the engine instead. The `ui.focus` hook selects the
   row the Tab/arrow ring lands on. The list is filtered, then sorted, before it is windowed; a background poll
   re-clamps the window but never moves it to the selection.
-- The fetch asks `gh` for `SEARCH_LIMIT` (100) requests; a result that long shows a notice in the pane, since the
-  inbox may have been cut off.
+- `gh search` cannot OR qualifiers, so each reason in `SEARCH_REASONS` (review requested, assigned) is its own search,
+  run in parallel and merged by URL (`mergePullRequests`); each PR keeps its `reasons`. Either search failing fails the
+  poll. Each asks for `SEARCH_LIMIT` (100) results; when one comes back full the `isTruncated` state shows a notice in
+  the pane, since the inbox may have been cut off.
 - The `SessionMode` hook rewrites the engine's mode labels to put two spaces after a leading icon: terminals that draw
   `⏸` two cells wide otherwise glue it to the text.
 - Posting actions are two-step on purpose (select action, then `Confirm`).

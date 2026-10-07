@@ -1,4 +1,4 @@
-import type { IPullRequest, TReviewAction, TSortMode } from '../types'
+import type { IPullRequest, TRequestReason, TReviewAction, TSortMode } from '../types'
 
 const SEARCH_FIELDS =
   'number,title,url,repository,author,isDraft,createdAt,commentsCount,labels'
@@ -17,11 +17,19 @@ export const ACTION_VERBS: Readonly<Record<TReviewAction, string>> = {
   comment: 'Comment on',
 }
 
-export const searchArgv = (): string[] => [
+// `gh search` cannot OR two qualifiers, so each reason is its own search and the results are merged.
+export const SEARCH_REASONS: readonly TRequestReason[] = ['review', 'assigned']
+
+const REASON_FLAGS: Readonly<Record<TRequestReason, string>> = {
+  review: '--review-requested=@me',
+  assigned: '--assignee=@me',
+}
+
+export const searchArgv = (reason: TRequestReason = 'review'): string[] => [
   'gh',
   'search',
   'prs',
-  '--review-requested=@me',
+  REASON_FLAGS[reason],
   '--state=open',
   '--json',
   SEARCH_FIELDS,
@@ -67,7 +75,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const asText = (value: unknown): string => (typeof value === 'string' ? value : '')
 
-export const parsePullRequests = (stdout: string): IPullRequest[] => {
+export const parsePullRequests = (
+  stdout: string,
+  reason: TRequestReason = 'review',
+): IPullRequest[] => {
   const parsed: unknown = JSON.parse(stdout)
   if (!Array.isArray(parsed)) {
     throw new Error('gh returned something other than a list')
@@ -95,11 +106,36 @@ export const parsePullRequests = (stdout: string): IPullRequest[] => {
       createdAt: asText(raw.createdAt),
       commentsCount: typeof raw.commentsCount === 'number' ? raw.commentsCount : 0,
       labels,
+      reasons: [reason],
     })
   }
 
   return pullRequests
 }
+
+// One entry per URL, in first-seen order, with the reasons of every search that found it.
+export const mergePullRequests = (
+  lists: readonly (readonly IPullRequest[])[],
+): IPullRequest[] => {
+  const byUrl = new Map<string, IPullRequest>()
+  for (const pullRequest of lists.flat()) {
+    const known = byUrl.get(pullRequest.url)
+    byUrl.set(
+      pullRequest.url,
+      known === undefined
+        ? pullRequest
+        : { ...known, reasons: [...new Set([...known.reasons, ...pullRequest.reasons])] },
+    )
+  }
+  return [...byUrl.values()]
+}
+
+export const reasonLabel = (pullRequest: IPullRequest): string =>
+  pullRequest.reasons.map(reason => (reason === 'review' ? 'review requested' : 'assigned')).join(' + ')
+
+// The lead of a toast or band: a requested review outranks a plain assignment.
+export const describeReason = (pullRequest: IPullRequest): string =>
+  pullRequest.reasons.includes('review') ? 'Review requested' : 'Assigned to you'
 
 export interface IInboxDiff {
   readonly fresh: IPullRequest[]
@@ -151,10 +187,10 @@ export const badgeLabel = (count: number, hasError: boolean): string | undefined
 }
 
 export const describeFresh =(fresh: readonly IPullRequest[]): string[] => {
-  if (fresh.length > 3) return [`${fresh.length} new PR review requests`]
+  if (fresh.length > 3) return [`${fresh.length} new PRs in your inbox`]
   return fresh.map(
     pullRequest =>
-      `Review requested: ${shortRef(pullRequest)} "${truncate(pullRequest.title, 60)}" by @${pullRequest.author}`,
+      `${describeReason(pullRequest)}: ${shortRef(pullRequest)} "${truncate(pullRequest.title, 60)}" by @${pullRequest.author}`,
   )
 }
 
@@ -182,6 +218,7 @@ export const filterPullRequests = (
 
     const haystack = [
       shortRef(pullRequest),
+      reasonLabel(pullRequest),
       pullRequest.title,
       pullRequest.author,
       ...pullRequest.labels,

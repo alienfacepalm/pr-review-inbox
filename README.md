@@ -1,12 +1,12 @@
 # pr-review-inbox
 
-A Claude Code mod that pops up when someone requests your review on a GitHub pull request,
-shows the open requests as a list, and lets you act on the one you pick.
+A Claude Code mod that pops up when someone requests your review on a GitHub pull request, or assigns you to one,
+shows the open ones as a list, and lets you act on the one you pick.
 
 - **Pop-up**: a toast when a new request arrives, a band above the prompt (`Review` / `Dismiss`),
   and a `[ ⇄ N PRs ]` badge at the right end of the prompt footer. Click the badge to open the list.
 - **List**: `/prs` (or the badge, or the band's `Review` button) opens a pane listing every open PR that is
-  waiting on your review (up to 100). It scrolls, filters as you type, sorts and can hide drafts, so dozens of
+  waiting on you, whether your review was requested or you are an assignee (up to 100 of each). It scrolls, filters as you type, sorts and can hide drafts, so dozens of
   requests stay easy to work through. Pick one to see its details.
 - **Actions**: open in browser, draft a Claude review prompt, approve, request changes, comment.
   Anything that posts to GitHub asks for a confirm first.

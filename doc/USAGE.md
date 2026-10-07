@@ -4,7 +4,7 @@
 
 | Where | What |
 | --- | --- |
-| Toast (top right) | `Review requested: owner/repo#123 "title" by @author`. More than three at once collapse to `N new PR review requests`. |
+| Toast (top right) | `Review requested: owner/repo#123 "title" by @author`, or `Assigned to you: ...` for a PR you were assigned to. More than three at once collapse to `N new PRs in your inbox`. |
 | Band above the prompt | Shown while there are requests you have not looked at. `Review` opens the pane, `Dismiss` clears the band. |
 | Footer badge (right end of the prompt footer, after the mode labels) | `[ ⇄ N PRs ]`; click it to open the pane. Highlighted while there are requests you have not looked at. Hidden when nothing waits. `[ ⇄ PRs: gh error ]` when `gh` fails; the pane shows the error. |
 | `/prs` | Opens the pane and refreshes. |
@@ -40,9 +40,15 @@ After a review is posted the pane refreshes. GitHub drops you from the requested
 
 ## What counts as a request
 
-`gh search prs --review-requested=@me --state=open --limit 100`: open PRs where you are asked directly (the 100 most
-recent; the pane says so when the result is that long).
-Requests made only to a team you belong to are not included.
+Two searches, merged by URL (a PR found by both shows once, tagged `review requested + assigned`):
+
+- `gh search prs --review-requested=@me --state=open --limit 100`: open PRs where you are asked directly.
+  Requests made only to a team you belong to are not included.
+- `gh search prs --assignee=@me --state=open --limit 100`: open PRs you are an assignee of. Add yourself as an
+  assignee on GitHub and the PR appears at the next poll (or press `Refresh`).
+
+Each search returns at most 100; the pane says so when either comes back full. The detail line under the list shows
+why a PR is there (`review requested`, `assigned`), and typing `assigned` or `review` in the filter narrows by it.
 
 ## First run
 

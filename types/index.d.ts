@@ -1,3 +1,5 @@
+export type TRequestReason = 'review' | 'assigned'
+
 export interface IPullRequest {
   readonly url: string
   readonly number: number
@@ -8,6 +10,8 @@ export interface IPullRequest {
   readonly createdAt: string
   readonly commentsCount: number
   readonly labels: readonly string[]
+  // Why it is in the inbox: your review was requested, you are an assignee, or both.
+  readonly reasons: readonly TRequestReason[]
 }
 
 export type TReviewAction = 'approve' | 'request-changes' | 'comment'
@@ -31,6 +35,7 @@ declare module 'claude-code' {
       pollError: string | null
       lastPolledAt: number | null
       isBusy: boolean
+      isTruncated: boolean
       filterText: string
       sortMode: TSortMode
       isHidingDrafts: boolean
